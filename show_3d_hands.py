@@ -1,23 +1,23 @@
-import numpy as np
+from pathlib import Path
+
 import matplotlib.pyplot as plt
-from utils import DLT
+import numpy as np
 
 def read_keypoints(filename):
-    fin = open(filename, 'r')
+    path = Path(filename)
+    keypoints = []
 
-    kpts = []
-    while(True):
-        line = fin.readline()
-        if line == '': break
+    with path.open('r') as fin:
+        for raw_line in fin:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
 
-        line = line.split()
-        line = [float(s) for s in line]
+            values = [float(s) for s in stripped.split()]
+            line = np.reshape(values, (21, -1))
+            keypoints.append(line)
 
-        line = np.reshape(line, (21, -1))
-        kpts.append(line)
-
-    kpts = np.array(kpts)
-    return kpts
+    return np.array(keypoints)
 
 
 def visualize_3d(p3ds):
