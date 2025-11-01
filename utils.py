@@ -1,3 +1,6 @@
+from pathlib import Path
+from typing import Mapping, Sequence
+
 import numpy as np
 
 
@@ -120,17 +123,38 @@ def get_projection_matrix(camera_id):
     return P
 
 def write_keypoints_to_disk(filename, kpts):
-    fout = open(filename, 'w')
+    """Persist keypoint arrays or mappings of arrays to disk.
 
-    for frame_kpts in kpts:
-        for kpt in frame_kpts:
-            if len(kpt) == 2:
-                fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ')
-            else:
-                fout.write(str(kpt[0]) + ' ' + str(kpt[1]) + ' ' + str(kpt[2]) + ' ')
+    Parameters
+    ----------
+    filename : str or Path
+        Target file path or base file name. When ``kpts`` is a mapping the
+        camera identifier is appended to the stem before the suffix.
+    kpts : Sequence or Mapping
+        Array-like structure describing per-frame keypoints. When a mapping is
+        provided, each value is written to an individual file derived from
+        ``filename``.
+    """
 
-        fout.write('\n')
-    fout.close()
+    def _write_single(path: Path, keypoints: Sequence[Sequence[Sequence[float]]]):
+        with path.open('w') as fout:
+            for frame_kpts in keypoints:
+                for kpt in frame_kpts:
+                    coords = list(kpt)
+                    fout.write(' '.join(str(value) for value in coords) + ' ')
+                fout.write('\n')
+
+    if isinstance(kpts, Mapping):
+        base_path = Path(filename)
+        suffix = base_path.suffix if base_path.suffix else '.dat'
+        stem = base_path.stem if base_path.suffix else base_path.name
+        parent = base_path.parent if base_path.parent != Path('') else Path('.')
+
+        for camera_id, camera_kpts in kpts.items():
+            camera_path = parent / f"{stem}_cam{camera_id}{suffix}"
+            _write_single(camera_path, camera_kpts)
+    else:
+        _write_single(Path(filename), kpts)
 
 if __name__ == '__main__':
 

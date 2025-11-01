@@ -1,4 +1,4 @@
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, TypedDict, Union
 
 import argparse
 from pathlib import Path
@@ -16,11 +16,27 @@ frame_shape = [720, 1280]
 InputSpec = Union[int, str]
 
 
-def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
+class KeypointResults(TypedDict):
+    keypoints_2d: Dict[int, np.ndarray]
+    keypoints_3d: np.ndarray
+
+
+def run_mp(
+    inputs: Sequence[InputSpec],
+    projections: Sequence[np.ndarray],
+    camera_ids: Optional[Sequence[int]] = None,
+) -> KeypointResults:
     if len(inputs) != len(projections):
         raise ValueError("Number of inputs must match number of projection matrices")
     if len(projections) < 2:
         raise ValueError("run_mp requires at least two projection matrices")
+
+    if camera_ids is None:
+        camera_ids = list(range(len(inputs)))
+    else:
+        camera_ids = list(camera_ids)
+    if len(camera_ids) != len(inputs):
+        raise ValueError("Number of camera identifiers must match inputs")
 
     #input video stream
     caps = [cv.VideoCapture(stream) for stream in inputs]
@@ -39,8 +55,18 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
     ]
 
     #containers for detected keypoints for each camera
-    kpts_2d = [[] for _ in inputs]
+    kpts_2d: Dict[int, List[List[List[int]]]] = {camera_id: [] for camera_id in camera_ids}
     kpts_3d = []
+
+    window_names = []
+    for camera_id, source in zip(camera_ids, inputs):
+        if isinstance(source, int):
+            source_label = f"cam{source}"
+        else:
+            source_label = Path(str(source)).name
+        window_name = f"Camera {camera_id}: {source_label}"
+        cv.namedWindow(window_name, cv.WINDOW_NORMAL)
+        window_names.append(window_name)
 
     while True:
 
@@ -70,7 +96,7 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
         results = [hand.process(frame) for hand, frame in zip(hands, rgb_frames)]
 
         frame_keypoints_per_camera = []
-        for idx, (frame, result) in enumerate(zip(rgb_frames, results)):
+        for camera_id, frame, result in zip(camera_ids, rgb_frames, results):
             frame_keypoints = []
             if result.multi_hand_landmarks:
                 for hand_landmarks in result.multi_hand_landmarks:
@@ -83,7 +109,7 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
                 #if no keypoints are found, simply fill the frame data with [-1,-1] for each kpt
                 frame_keypoints = [[-1, -1]] * 21
 
-            kpts_2d[idx].append(frame_keypoints)
+            kpts_2d[camera_id].append(frame_keypoints)
             frame_keypoints_per_camera.append(frame_keypoints)
 
         #calculate 3d position
@@ -115,8 +141,8 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
                 for hand_landmarks in result.multi_hand_landmarks:
                     mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-        for idx, frame in enumerate(bgr_frames):
-            cv.imshow(f"cam{idx}", frame)
+        for window_name, frame in zip(window_names, bgr_frames):
+            cv.imshow(window_name, frame)
 
         k = cv.waitKey(1)
         if k & 0xFF == 27:
@@ -129,8 +155,8 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
     for hand in hands:
         hand.close()
 
-    kpts_2d_arrays = [np.array(cam_kpts) for cam_kpts in kpts_2d]
-    return (*kpts_2d_arrays, np.array(kpts_3d))
+    kpts_2d_arrays = {camera_id: np.array(cam_kpts) for camera_id, cam_kpts in kpts_2d.items()}
+    return {"keypoints_2d": kpts_2d_arrays, "keypoints_3d": np.array(kpts_3d)}
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -209,9 +235,8 @@ if __name__ == "__main__":
         parser.error(str(exc))
 
     projections = [get_projection_matrix(camera_id) for camera_id in camera_ids]
-    keypoints = run_mp(inputs, projections)
+    keypoints = run_mp(inputs, projections, camera_ids)
 
     #this will create keypoints file in current working folder
-    #for idx, cam_kpts in enumerate(keypoints[:-1]):
-    #    write_keypoints_to_disk(f'kpts_cam{idx}.dat', cam_kpts)
-    #write_keypoints_to_disk('kpts_3d.dat', keypoints[-1])
+    #write_keypoints_to_disk('kpts_2d.dat', keypoints["keypoints_2d"])
+    #write_keypoints_to_disk('kpts_3d.dat', keypoints["keypoints_3d"])
