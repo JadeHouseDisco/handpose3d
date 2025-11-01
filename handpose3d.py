@@ -4,7 +4,7 @@ import cv2 as cv
 import mediapipe as mp
 import numpy as np
 import sys
-from utils import DLT, get_projection_matrix, write_keypoints_to_disk
+from utils import get_projection_matrix, triangulate_points, write_keypoints_to_disk
 
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
@@ -17,8 +17,8 @@ InputSpec = Union[int, str]
 def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
     if len(inputs) != len(projections):
         raise ValueError("Number of inputs must match number of projection matrices")
-    if len(projections) != 2:
-        raise ValueError("run_mp currently supports exactly two projection matrices")
+    if len(projections) < 2:
+        raise ValueError("run_mp requires at least two projection matrices")
 
     #input video stream
     caps = [cv.VideoCapture(stream) for stream in inputs]
@@ -86,15 +86,13 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
 
         #calculate 3d position
         frame_p3ds = []
-        P0, P1 = projections[0], projections[1]
-        for uv1, uv2 in zip(
-            frame_keypoints_per_camera[0],
-            frame_keypoints_per_camera[1],
-        ):
-            if uv1[0] == -1 or uv2[0] == -1:
-                _p3d = [-1, -1, -1]
-            else:
-                _p3d = DLT(P0, P1, uv1, uv2)  #calculate 3d position of keypoint
+        num_landmarks = len(frame_keypoints_per_camera[0]) if frame_keypoints_per_camera else 0
+        for landmark_idx in range(num_landmarks):
+            observations = [
+                frame_keypoints_per_camera[camera_idx][landmark_idx]
+                for camera_idx in range(len(projections))
+            ]
+            _p3d = triangulate_points(projections, observations)
             frame_p3ds.append(_p3d)
 
         '''

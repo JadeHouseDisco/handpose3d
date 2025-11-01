@@ -9,24 +9,56 @@ def _make_homogeneous_rep_matrix(R, t):
     return P
 
 #direct linear transform
-def DLT(P1, P2, point1, point2):
+def triangulate_points(projections, points_2d, invalid_sentinel=(-1, -1)):
+    """Triangulate a 3D point from multiple camera observations.
 
-    A = [point1[1]*P1[2,:] - P1[1,:],
-         P1[0,:] - point1[0]*P1[2,:],
-         point2[1]*P2[2,:] - P2[1,:],
-         P2[0,:] - point2[0]*P2[2,:]
-        ]
-    A = np.array(A).reshape((4,4))
-    #print('A: ')
-    #print(A)
+    Parameters
+    ----------
+    projections : Sequence[np.ndarray]
+        Projection matrices for the contributing cameras.
+    points_2d : Sequence[Sequence[float]]
+        2D observations corresponding to ``projections``.
+    invalid_sentinel : Sequence[float], optional
+        Sentinel value to denote invalid 2D measurements. Observations equal
+        to this sentinel are ignored. Defaults to ``(-1, -1)``.
 
+    Returns
+    -------
+    np.ndarray
+        The triangulated 3D point. If fewer than two valid observations are
+        provided, ``[-1, -1, -1]`` is returned.
+    """
+
+    if len(projections) != len(points_2d):
+        raise ValueError("Number of projection matrices must match observations")
+
+    A_rows = []
+    invalid_sentinel = np.asarray(invalid_sentinel) if invalid_sentinel is not None else None
+
+    for P, pt in zip(projections, points_2d):
+        pt = np.asarray(pt)
+        if pt.shape[0] != 2:
+            raise ValueError("Each 2D observation must have exactly two coordinates")
+
+        if invalid_sentinel is not None and np.all(pt == invalid_sentinel):
+            continue
+
+        A_rows.append(pt[1] * P[2, :] - P[1, :])
+        A_rows.append(P[0, :] - pt[0] * P[2, :])
+
+    if len(A_rows) < 4:
+        return np.array([-1.0, -1.0, -1.0])
+
+    A = np.array(A_rows)
     B = A.transpose() @ A
     from scipy import linalg
-    U, s, Vh = linalg.svd(B, full_matrices = False)
 
-    #print('Triangulated point: ')
-    #print(Vh[3,0:3]/Vh[3,3])
-    return Vh[3,0:3]/Vh[3,3]
+    U, s, Vh = linalg.svd(B, full_matrices=False)
+    return Vh[3, 0:3] / Vh[3, 3]
+
+
+def DLT(P1, P2, point1, point2):
+    return triangulate_points([P1, P2], [point1, point2])
 
 def read_camera_parameters(camera_id):
 
