@@ -1,9 +1,11 @@
-from typing import Sequence, Union
+from typing import Dict, List, Sequence, Tuple, Union
+
+import argparse
+from pathlib import Path
 
 import cv2 as cv
 import mediapipe as mp
 import numpy as np
-import sys
 from utils import get_projection_matrix, triangulate_points, write_keypoints_to_disk
 
 mp_drawing = mp.solutions.drawing_utils
@@ -130,25 +132,86 @@ def run_mp(inputs: Sequence[InputSpec], projections: Sequence[np.ndarray]):
     kpts_2d_arrays = [np.array(cam_kpts) for cam_kpts in kpts_2d]
     return (*kpts_2d_arrays, np.array(kpts_3d))
 
-if __name__ == '__main__':
-
-    input_stream1 = 'media/cam0_test.mp4'
-    input_stream2 = 'media/cam1_test.mp4'
-
-    if len(sys.argv) == 3:
-        input_stream1 = int(sys.argv[1])
-        input_stream2 = int(sys.argv[2])
-
-    #projection matrices
-    P0 = get_projection_matrix(0)
-    P1 = get_projection_matrix(1)
-
-    kpts_cam0, kpts_cam1, kpts_3d = run_mp(
-        [input_stream1, input_stream2],
-        [P0, P1],
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run MediaPipe hand pose estimation on multiple camera feeds or video files."
+        )
     )
+    parser.add_argument(
+        "sources",
+        nargs="*",
+        help=(
+            "Camera identifiers or video file paths. If omitted, bundled demo videos "
+            "will be used."
+        ),
+    )
+    return parser
+
+
+def _coerce_sources(raw_sources: Sequence[str]) -> Tuple[List[InputSpec], List[int]]:
+    """Convert CLI source inputs to OpenCV inputs and calibration identifiers."""
+
+    inputs: List[InputSpec] = []
+    camera_ids: List[int] = []
+
+    for idx, source in enumerate(raw_sources):
+        try:
+            camera_id = int(source)
+        except ValueError:
+            camera_id = idx
+            inputs.append(source)
+        else:
+            inputs.append(camera_id)
+
+        camera_ids.append(camera_id)
+
+    return inputs, camera_ids
+
+
+def _validate_calibration_files(camera_ids: Sequence[int], calibration_dir: Path) -> None:
+    """Ensure calibration files exist for every requested camera."""
+
+    missing: Dict[int, List[str]] = {}
+    for camera_id in camera_ids:
+        required_files = [
+            calibration_dir / f"c{camera_id}.dat",
+            calibration_dir / f"rot_trans_c{camera_id}.dat",
+        ]
+        absent = [str(path) for path in required_files if not path.is_file()]
+        if absent:
+            missing[camera_id] = absent
+
+    if missing:
+        message_lines = ["Missing calibration files for the requested cameras:"]
+        for camera_id, files in missing.items():
+            message_lines.append(f"  Camera {camera_id}: {', '.join(files)}")
+        raise FileNotFoundError("\n".join(message_lines))
+
+
+if __name__ == "__main__":
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+
+    if args.sources:
+        raw_sources = args.sources
+    else:
+        raw_sources = ["media/cam0_test.mp4", "media/cam1_test.mp4"]
+
+    inputs, camera_ids = _coerce_sources(raw_sources)
+
+    if len(inputs) < 2:
+        parser.error("At least two camera identifiers or video sources are required.")
+
+    try:
+        _validate_calibration_files(camera_ids, Path("camera_parameters"))
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
+
+    projections = [get_projection_matrix(camera_id) for camera_id in camera_ids]
+    keypoints = run_mp(inputs, projections)
 
     #this will create keypoints file in current working folder
-    #write_keypoints_to_disk('kpts_cam0.dat', kpts_cam0)
-    #write_keypoints_to_disk('kpts_cam1.dat', kpts_cam1)
-    #write_keypoints_to_disk('kpts_3d.dat', kpts_3d)
+    #for idx, cam_kpts in enumerate(keypoints[:-1]):
+    #    write_keypoints_to_disk(f'kpts_cam{idx}.dat', cam_kpts)
+    #write_keypoints_to_disk('kpts_3d.dat', keypoints[-1])

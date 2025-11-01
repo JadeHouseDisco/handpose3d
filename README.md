@@ -28,7 +28,13 @@ If you want to use webcam, call the program with camera ids. For example, camera
 ```
 python handpose3d.py 0 1
 ```
-Make sure the corresponding camera parameters are also updated for your cameras.
+The script also accepts any number of video files or camera identifiers. Provide one argument per camera in the order their
+calibration files are numbered (``camera_parameters/c0.dat``, ``camera_parameters/rot_trans_c0.dat``, etc.):
+```
+python handpose3d.py cam0.mp4 cam1.mp4 cam2.mp4
+```
+For each requested camera ``N``, make sure both ``camera_parameters/cN.dat`` and ``camera_parameters/rot_trans_cN.dat`` exist
+and contain up-to-date calibration data.
 
 The 3D coordinate in each video frame is recorded in ```frame_p3ds``` parameter. Use this for real time application. If keypoints are not found, then the keypoints are recorded as (-1, -1, -1). **Warning**: The code also saves keypoints for all previous frames. If you run the code for long periods, then you will run out of memory. To fix this, remove append calls to: ```kpts_3d, kpts_cam0. kpts_cam1```. When you press the ESC key, hand keypoints detection will stop and three files will be saved to disk. These contain recorded 2D and 3D coordinates. 
 
